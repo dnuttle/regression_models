@@ -1,0 +1,1687 @@
+---
+title: "Textbook Notes"
+output:
+  html_document: default
+  pdf_document:
+    latex_engine: xelatex
+  word_document: default
+---
+```{r results='hide', message=FALSE, warning=FALSE}
+library(ggplot2)
+library(UsingR)
+library(dplyr)
+library(reshape)
+library(datasets)
+library(gridExtra)
+library(GGally)
+data(diamond)
+data(galton)
+```
+
+## Chapter 1. Introduction
+
+### Before beginning
+
+The recommendation for the swirl module for this course is ill-advised in my opinion.  It's terrible and confusing.
+ 
+### Regression models
+
+> "Regression models are the workhorse of data science. They are the most well described, practical
+and theoretically understood models in statistics. A data scientist well versed in regression models
+will be able to solve and incredible array of problems.
+
+> Perhaps the key insight for regression models is that they produce highly interpretable model fits.
+This is unlike machine learning algorithms, which often sacrifice interpretability for improved
+prediction performance or automation."
+
+### Motivating examples
+
+* Francis Galton's data on parent and child heights
+* Simply Statistics versus Kobe Bryant
+
+### Summary notes: questions for this book
+
+Questions that can be answered using regression:
+
+1. Prediction: e.g., use parents' heights to predict childrens' heights
+2. Modeling: Find a parsimonious, easily-described mean relationship between parent and children heights
+3. Covariation: Investigate the variation in child heights that appears unrelated to parent heights
+
+### Exploratory analysis of Galton's data
+
+**NOTE** that the following slyly and silently throws in usage of the `reshape` library, without making any reference to it.  It's a great library and ought to be learned, but it is not easy to grasp on first contact.
+
+```{r}
+long <- melt(galton)
+g <- ggplot(long, aes(x = value, fill = variable))
+g <- g + geom_histogram(colour = "black", binwidth=1)
+g <- g + facet_grid(. ~ variable)
+g
+```
+
+#### Finding the middle via least squares
+
+Find the middle, or $\mu$, that minimizes:
+
+$$\sum_{i=1}^n (Y_i - \mu)^2$$
+
+Spoiler:  The answer is $\mu = \bar{Y}$.
+
+#### Experiment
+
+```{r eval=FALSE}
+library(manipulate)
+myHist <- function(mu){
+mse <- mean((galton$child - mu)^2)
+g <- ggplot(galton, aes(x = child)) + geom_histogram(fill = "salmon", colour\
+= "black", binwidth=1)
+g <- g + geom_vline(xintercept = mu, size = 3)
+g <- g + ggtitle(paste("mu = ", mu, ", MSE = ", round(mse, 2), sep = ""))
+g
+}
+manipulate(myHist(mu), mu = slider(62, 74, step = 0.5))
+```
+
+Uses the `manipulate` function to allow for interactive exploration to discover that the value of $\mu$ that minimizes squared differences is about 68, which is near $\bar{Y}$.
+
+```{r}
+g <- ggplot(galton, aes(x = child)) + geom_histogram(fill = "salmon", colour = "black", binwidth=1)
+g <- g + geom_vline(xintercept = mean(galton$child), size = 3)
+g
+```
+
+### The math (not required)
+
+$$\sum_{i=1}^n (Y_i - \mu)^2 = \sum_{i=1}^n (Y_i - \bar{Y} + \bar{Y} - \mu)^2$$
+
+$$= \sum_{i=1}^n (Y_i -\bar{Y})^2 + 2\sum_{i=1}^n (Y_i - \bar{Y})(\bar{Y} - \mu) + \sum_{i=1}^n (\bar{Y} - \mu)^2$$
+
+$$= \sum_{i=1}^n (Y_i - \bar{Y})^2 + 2(\bar{Y} - \mu) \sum_{i=1}^n (Y_i - \bar{Y}) + \sum_{i=1}^n (\bar{Y} - \mu)^2$$
+
+$$= \sum_{i=1}^n (Y_i - \bar{Y})^2 + 2(\bar{Y} - \mu) (\sum_{i=1}^n Y_i - n\bar{Y}) + \sum_{i=1}^n (\bar{Y} - \mu)^2$$
+
+$$= \sum_{i=1}^n (Y_i - \bar{Y})^2 + \sum_{i=1}^n (\bar{Y} - \mu)^2$$
+
+$$\ge \sum_{i=1}^n (Y_i - \bar{Y})^2$$
+
+### Comparing children's heights and their parents' heights
+
+```{r}
+ggplot(galton, aes(x = parent, y = child)) + geom_point()
+
+freqData <- as.data.frame(table(galton$child, galton$parent))
+names(freqData) <- c("child", "parent", "freq")
+freqData$child <- as.numeric(as.character(freqData$child))
+freqData$parent <- as.numeric(as.character(freqData$parent))
+g <- ggplot(filter(freqData, freq > 0), aes(x = parent, y = child))
+g <- g  + scale_size(range = c(2, 20), guide = "none" )
+g <- g + geom_point(colour="grey50", aes(size = freq+20, show_guide = FALSE))
+g <- g + geom_point(aes(colour=freq, size = freq))
+g <- g + scale_colour_gradient(low = "lightblue", high="white")                    
+g
+```
+
+### Regression through the origin
+
+A line requires two parameters, intercept and slope.  If we want to focus only on the slope, we can subtract the mean from each data point, so that the mean becomes 0, and thus the line passes through the origin.  So now we can determine the slope $\beta$ that minimizes:
+
+$$\sum_{i=1}^n (Y_i - X_i\beta)^2$$
+
+Each $X_i\beta$ is the vertical height of a line through the point $X_i$.  So $Y_i - X_i\beta$ is the vertical distance between each observed data point and the point on the line $X_i\beta$.
+
+The following is another interactive experiment that demonstrates that the value $\beta$ that minimizes $\sum_{i=1}^n (Y_i - X_i\beta)^2$ is about 0.646.
+
+```{r eval=FALSE}
+y <- galton$child - mean(galton$child)
+x <- galton$parent - mean(galton$parent)
+freqData <- as.data.frame(table(x, y))
+names(freqData) <- c("child", "parent", "freq")
+freqData$child <- as.numeric(as.character(freqData$child))
+freqData$parent <- as.numeric(as.character(freqData$parent))
+myPlot <- function(beta){
+g <- ggplot(filter(freqData, freq > 0), aes(x = parent, y = child))
+g <- g + scale_size(range = c(2, 20), guide = "none" )
+g <- g + geom_point(colour="grey50", aes(size = freq+20, show_guide = FALSE))
+g <- g + geom_point(aes(colour=freq, size = freq))
+g <- g + scale_colour_gradient(low = "lightblue", high="white")
+g <- g + geom_abline(intercept = 0, slope = beta, size = 3)
+mse <- mean( (y - beta * x) ^2 )
+g <- g + ggtitle(paste("beta = ", beta, "mse = ", round(mse, 3)))
+g
+}
+manipulate(myPlot(beta), beta = slider(0.6, 1.2, step = 0.02))
+```
+
+
+### The solution
+
+And here is the official answer.  Both $Y$ and $X$ have been centered at 0.  The `-1` in the formula indicates that we do not want an intercept in the model.
+
+```{r}
+lm(I(child - mean(child))~ I(parent - mean(parent)) - 1, data = galton)
+```
+
+**IMPORTANT NOTE** re the graph in this section:  "(Note that I shifted the origin back to the means of the original data.)"  The code in the previous section centers the data at the origin.  But it's irrelevant in terms of the slope, which is unaffected by the intercept or centering:
+
+```{r}
+lm(child ~ parent, data=galton)
+```
+
+### Exercises
+
+1. Consider the data set given by `x=c(0.725, 0.429, -0.372, 0.863)`.  What value of $\mu$ minimizes `sum((x - mu)^2)`?
+
+```{r}
+x <- c(0.725, 0.429, -0.372, 0.863)
+mu <- mean(x)
+mu
+```
+
+2. Reconsider the previous question.  Suppose that weights given were `w=c(2, 2, 1, 1)` so that we wanted to minimize `sum(w * (x - mu)^2)` for mu.  What value  would we obtain?
+
+```{r}
+w <- c(2, 2, 1, 1)
+mu <- sum(w * x) / sum(w)
+mu
+```
+
+3. Take the Galton and obtain the regression through the origin slope estimate where the centered parental height is the outcome and the child's height is is the predictor.
+
+```{r}
+yc <- galton$parent - mean(galton$parent)
+xc <- galton$child - mean(galton$child)
+lm(yc ~ xc)
+
+#Or
+sum(yc * xc) / sum(xc^2)
+```
+
+The phrasing "the regression through the origin slope estimate" is unclear.  The point of the exercise was unclear.  What is wanted (which the video answer makes clear) is to demonstrate that the slope is equal to:
+
+$$\hat{\beta}_1 = \frac{\sum_{i=1}^n X_i Y_i}{\sum_{i=1}^n X_i^2}$$
+
+This is because, when we use regression through the origin, the residuals sum to 0.
+
+But this is not covered until the next chapter (and in fact, the chapter after that).  This is an example of what made my first attempt to take this course conclude that it was sloppily arranged and poorly organized.  Why not throw in a few questions from the last chapter?  Or from the last chapter of the next course?
+
+Further, there are apparently two different meanings to "regression through the origin" in this course.  one is when you center the data, so that now the regression line naturally passes through the origin.  THe other is when you simply force it through the origin.  Example from quiz 1.  The question was:
+
+"Fit the regression through the origin and get the slope treating y as the outcome and x as the regressor. (Hint, do not center the data since we want regression through the origin, not through the means of the data.)"
+
+```{r}
+x <- c(0.8, 0.47, 0.51, 0.73, 0.36, 0.58, 0.57, 0.85, 0.44, 0.42)
+y <- c(1.39, 0.72, 1.55, 0.48, 1.19, -1.59, 1.23, -0.65, 1.49, 0.05)
+
+# long way
+sum(x * y) / sum(x^2)
+
+# short way
+lm(y ~ x - 1)
+```
+
+Notice that the slope is the same in both cases.  This is just forcing a regression line through the origin.
+
+```{r}
+plot(y ~ x, xlim=c(-0.1, 1))
+abline(lm(y ~ x - 1), col="red")
+abline(lm(y ~ x), col="blue")
+```
+
+The blue line above is the natural regression line.  The red one is forced through the origin.
+
+## Chapter 2. Notation
+
+### Some basic definitions
+
+### Notation for data
+
+$X_1, X_2, X_3, ..., X_n$ describes data points for a random variable (in this case, $X$).  For example, ${1, 2, 3}$ as $X_1=1, X_2=2, X_3=3$.
+
+### The emprical mean
+
+$$\bar{X} = \frac{1}{n} \sum_{i=1}^n X_i$$
+
+If we subtract the mean from each data point, the new data set has mean 0.  So this:
+
+$$\tilde{X}_i = X_i - \bar{X}$$
+
+has a mean of 0.  This is called **centering** the variable.
+
+### The empirical standard deviation and variance
+
+Variance:
+
+$$S^2 = \frac{1}{n-1} \sum_{i=1}^n (X_i - \bar{X})^2 = \frac{1}{n-1}\left( \sum_{i=1}^n X_i^2 - n\bar{X}^2 \right)$$
+
+Standard deviation:
+
+$$S = \sqrt{S^2}$$
+
+### Normalization
+
+What is shown here is *standardization* using Z-scores, which is only one form of normalization.  Others include min-max.  It's somewhat misleading to present Z-score standardization as what appears to be **the** definition of "normalization".
+
+$$Z_i = \frac{X_i - \bar{X}}{S}$$
+
+The above would have mean 0 and a standard deviation of 1.
+
+### Empirical covariance (and correlation)
+
+$$Cov(X, Y) = \frac{1}{n-1} \sum_{i=1}^n (X_i - \bar{X}) (Y_i - \bar{Y}) = \frac{1}{n-1} \sum_{i=1}^n \left(X_i Y_i - n\bar{X}\bar{Y}  \right)$$
+
+$$Cor(X, Y) = \frac{Cov(X, Y)}{S_x S_y}$$
+
+### Some facts about correlation
+
+* $Cor(X, Y) = Cor(Y, X)$
+* $-1 \le Cor(X, Y) \le 1$
+* Correlation is exactly 1 or -1 only when all observations fall exactly on a straight line with a non-zero slope.
+* $Cor(X, Y)$ measures the strength of a *linear* relationship between two variables, with a stronger relationship the closer the correlation is to 1 or -1.
+* A correlation of 0 indicates no linear relationship at all between two variables.
+
+### Exercises
+
+1. Take the Galton dataset and find the mean, standard deviation and correlation between the parental and child heights.
+
+```{r}
+parent.mean <- mean(galton$parent)
+parent.sd <- sd(galton$parent)
+child.mean <- mean(galton$child)
+child.sd <- sd(galton$child)
+galton.rho <- cor(galton$child, galton$parent)
+parent.mean
+parent.sd
+child.mean
+child.sd
+galton.rho
+```
+
+2. Center the parent and child variables and verify that the centered variable means are 0.
+
+```{r}
+parent.c <- galton$parent - mean(galton$parent)
+child.c <- galton$child - mean(galton$child)
+mean(parent.c)
+mean(child.c)
+```
+
+3. Rescale the parent and child variables and verify that the scaled variable standard deviations are 1.
+
+```{r}
+parent.scale <- galton$parent / sd(galton$parent)
+child.scale <- galton$child / sd(galton$child)
+sd(parent.scale)
+sd(child.scale)
+```
+
+4. Normalize the parent and child heights.  Verify that the 
+
+What is wanted is standardization, a particular form of normalization.
+
+```{r}
+parent.c <- galton$parent - mean(galton$parent)
+child.c <- galton$child - mean(galton$child)
+parent.std <- parent.c / sd(parent.c)
+child.std <- child.c / sd(child.c)
+mean(parent.std)
+sd(parent.std)
+mean(child.std)
+sd(child.std)
+```
+
+## Chapter 3. Ordinary Least Squares
+
+### General least squares for linear equations
+
+The goal is to minimize the sum of the squares:
+
+$$\sum_{i=1}^n {Y_i - (\beta_0 \beta_1 X_i)}^2$$
+
+The result:
+
+$$\hat{\beta}_1 = Cor(X, Y) \frac{S_y}{S_x}$$
+
+$$\hat{\beta}_0 = \bar{Y} - \hat{\beta}_1 \bar{X}$$
+
+If we use regression through the origin (to review, that means centering both $X$ and $Y$ on their means), then:
+
+$$\hat{\beta}_1 = \frac{\sum_{i=1}^n  X_i Y_i}{\sum_{i=1}^n X_i^2}$$
+
+This is simply the covariance of $X$ and $Y$.  That is because, when the data for both variables has been centered, they both have standard deviations of 1, so $Cor(X, Y) = Cov(X, Y)$ and $\frac{S_y}{S_x} = \frac{1}{1} = 1$.
+
+### My side note
+
+This is always true:
+
+$$\hat{\beta}_1 = Cor(Y,X)\frac{S_y}{S_x} = \frac{Cov(Y,X)}{S_x S_y} \frac{S_y}{S_x} = \frac{Cov(Y,X)}{S_x^2}$$
+
+For example, from the `father.son` dataset:
+
+```{r}
+data(father.son)
+fit <- lm(sheight ~ fheight, data=father.son)
+coef(fit)[2]
+cov(father.son$sheight, father.son$fheight) / sd(father.son$fheight)^2
+```
+
+### Revisting Galton's data
+
+Calculate the coefficients using child height as response and parent height as predictor:
+
+```{r}
+y <- galton$child
+x <- galton$parent
+beta1 <- cor(y, x) * sd(y) / sd(x)
+beta0 <- mean(y) - beta1 * mean(x)
+rbind(c(beta0, beta1), coef(lm(y ~ x)))
+```
+
+Now reverse the relationship:
+
+```{r}
+beta1 <- cor(y, x) * sd(x) / sd(y)
+beta0 <- mean(x) - beta1 * mean(y)
+rbind(c(beta0, beta1), coef(lm(x ~ y)))
+```
+
+Regression through the origin gives us the same slope; i.e., changing the intercept does not affect the slope:
+
+```{r}
+yc <- y - mean(y)
+xc <- x - mean(x)
+beta1 <- sum(yc * xc) / sum(xc ^ 2)
+c(beta1, coef(lm(y ~ x))[2])
+```
+
+But normalizing (standardizing) the data makes the slope equal to the correlation:
+
+```{r}
+yn <- (y - mean(y))/sd(y)
+xn <- (x - mean(x))/sd(x)
+c(cor(y, x), cor(yn, xn), coef(lm(yn ~ xn))[2])
+```
+
+### Exercises
+
+1. Install and load the package `UsingR` and load the `father.son` dataset with `data(father.son)`.  Get the linear regression fit where the son's height is the outcome and the father's height is the predictor.  Give the intercept and slope, plot the data and overly the fitted regression line.
+
+```{r}
+data(father.son)
+x <- father.son$fheight
+y <- father.son$sheight
+fit <- lm(y ~ x)
+coef(fit)
+itc <- coef(fit)[1]
+slope <- coef(fit)[2]
+itc
+slope
+ggplot(father.son, aes(x=fheight, y=sheight)) +
+  geom_point() +
+  geom_abline(intercept = itc, slope=slope) +
+  xlab("Father's height") +
+  ylab("Son's height")
+```
+
+2. Refer to problem 1.  Center the father and son variables and refit the model omitting the intercept.  Verify that the slope estimate is the same as the linear regression fit from prolem 1.
+
+```{r}
+xc <- father.son$fheight - mean(father.son$fheight)
+yc <- father.son$sheight - mean(father.son$sheight)
+fitc <- lm(yc ~ xc)
+slopec <- coef(fitc)[2]
+slopec
+round(slope, digits=6) == round(slopec, digits=6)
+```
+
+3. Refer to problem 1.  Normalize the father and son data and see that the fitted slope is the correlation.
+
+```{r}
+xn <- (father.son$fheight - mean(father.son$fheight)) / sd(father.son$fheight)
+yn <- (father.son$sheight - mean(father.son$sheight)) / sd(father.son$sheight)
+fitn <- lm (yn ~ xn)
+corrn <- cor(yn, xn)
+slopen <- coef(fitn)[2]
+corrn
+slopen
+round(corrn, digits=6) == round(slopen, digits=6)
+```
+
+4. Go back to the linear regression line from problem 1.  If a father's height was 63 inches, what would you predict the son's height to be?
+
+```{r}
+predict(fit, newdata=data.frame(x=63))
+```
+
+5. Consider a dataset where the standard deviation of the outcome variable is double that of the predictor.  Also, the correlation of the variables is 0.3.  If you fit a linear regression model, what would be the estimate of the slope?
+
+We know that:
+
+$$\hat{\beta}_1 = Cor(Y, X) \cdot \frac{S_y}{S_x}$$
+
+If the correlation is 0.3, and the outcome variable's standard deviation is twice that of the predictor's, then the slope must be $0.3 \cdot \frac{2}{1} = 0.6$.
+
+6. Consider the previous problem.  The outcome variable has a mean of 1 and the predictor has a mean of 0.5.  What would be the intercept?
+
+We know that:
+
+$$\hat{\beta}_0 = \bar{Y} - \hat{\beta}_1 \bar{X}$$
+
+So if $\bar{Y} = 1$ and $\bar{X} = 0.5$, then $\hat{\beta}_0 = 1 - 0.6 * 0.5 = 1 - 0.3 = 0.7$.
+
+7. True or false, if the predictor variable has mean 0, the estimated intercept from linear regression will be the mean of the outcome.
+
+True.  The intercept is:
+
+$$\hat{beta}_0 = \bar{Y} - \hat{beta}_1 \bar{X}$$
+
+So if $\bar{X}=0$, the entire right term $\hat{beta}_1 \bar{X}$ is zero, and we are left only with $\hat{\beta}_0 = \bar{Y}$.
+
+8. Consider problem 5 again.  What would be the estimated slope if the predictor and outcome were reversed?
+
+This time we multiply the correlation, 0.3, by $\frac{1}{2}$ instead of $\frac{2}{1}$, so the result is 0.15.
+
+## Chapter 4. Regression to the mean
+
+### A historically famous idea, regression to the mean
+
+Galton discovered that children of tall parents tended to be tall, but not quite as tall, and children of short parents tended to be short, but not quite as short.  They "regressed to the mean."
+
+### Regression to the mean
+
+Standardize both predictor and response so that we have regression through the mean, and then plot regression lines in both directions, i.e., child height is response, and then parent height is response.  It shows that the slope of one is the multiplicative inverse of the other.
+
+(Without standardizing, the slopes will not necessarily be multiplicative inverses of each other.)
+
+```{r}
+data(father.son)
+y <- (father.son$sheight - mean(father.son$sheight)) / sd(father.son$sheight)
+x <- (father.son$fheight - mean(father.son$fheight)) / sd(father.son$fheight)
+rho <- cor(x, y)
+g = ggplot(data.frame(x, y), aes(x = x, y = y))
+g = g + geom_point(size = 5, alpha = .2, colour = "black")
+g = g + geom_point(size = 4, alpha = .2, colour = "red")
+g = g + geom_vline(xintercept = 0)
+g = g + geom_hline(yintercept = 0)
+#following invalid in ggplot2 v2.0.0 but good luck finding that documented
+#g = g + geom_abline(position = "identity")
+g = g + geom_abline(intercept=0, slope=1)
+g = g + geom_abline(intercept = 0, slope = rho, size = 2)
+g = g + geom_abline(intercept = 0, slope = 1 / rho, size = 2)
+g = g + xlab("Father's height, normalized")
+g = g + ylab("Son's height, normalized")
+g
+```
+
+If you had to predict a son's normalized (standardized) height, it would be $Cor(Y, X) \cdot X_i$, where $X_i$ is the standardized father's height.  If you  had to predict a father's normalized height, it would be $Cor(Y, X) * Y_i$.
+
+"Multiplication by this correlation shrinks toward 0 (regression toward the mean)".
+
+### Exercises
+
+1. You have two noisy scales and a bunch of people that you'd like to weigh.  You weigh each person on both scales.  The correlation was 0.75.  If you normalized each set of weights, what would you have to multiply the weight on one scale to get a good estimate of the weight on the other scale?
+
+If both variables have been normalized, then both have a standard deviation of 1.  Now the slope of the regression line is therefore the correlation, or 0.75.  Or 1/0.75 = 1.33.
+
+```{r}
+library(UsingR)
+data(father.son)
+y <- (father.son$sheight - mean(father.son$sheight)) / sd(father.son$sheight)
+x <- (father.son$fheight - mean(father.son$fheight)) / sd(father.son$fheight)
+rho <- cor(x, y)
+rho
+cor(father.son$fheight, father.son$sheight)
+cor(father.son$sheight, father.son$fheight)
+```
+
+2. Consider the previous problem.  Someone's weight was 2 standard deviations above the mean of the group on the first scale.  How many standard deviations above the mean would you estimate them to be on the second?
+
+2 * 0.75 = 1.5
+
+3. You ask a collection of husbands and wives to guess how many jellybeans are in a jar.  The correlation is 0.2.  The standard deviation for the husbands is 10 beans while the standard deviation for wives is 8 beans.  Assume that the data were centered so that 0 is the mean for each.  The centered guess for a husband was 30 beans (above the mean).  What would be your best estimate of the wife's guess?
+
+The slope is $Cor(X, Y) \frac{S_y}{S_x} = 0.2 * \frac{8}{10} = 0.16$.  We are using regression through the origin so intercept is zero.  Therefore the best estimate is the husband's guess times the slope, $30 * 0.16 = 4.8$.
+
+## Chapter 5. Statistical linear regression models
+
+### Basic regression with additive Gaussian errors
+
+The model:
+
+$$Y_i = \beta_0 + \beta_1 X_i + \epsilon_i$$
+
+The above is the "true" and unknown model; we cannot know the true values of $\beta_0$, $\beta_1$ or $\epsilon_i$.  Instead, we estimate them.
+
+Under this model:
+
+$$E[Y_i | X_i = x_i] = \mu_i = \beta_0 + \beta_1 X_i$$
+
+Some notes on the above:
+
+* $X_i = x_i$ is a strange notation that just means, "assuming that our X value is some specified value"
+* $\mu_i$ does not mean the empirical mean; rather, it means merely an expected value
+* The lack of hats on the betas again indicate that they are the true population parameters, not statistical estimates
+
+Also:
+
+$$Var(Y_i | X_i = x_i) = \sigma^2$$
+
+All of the above could be written "more compactly":
+
+$$Y_i | X_i = x_i ~ N(\beta_0 + \beta_1 X_i, \sigma^2)$$
+
+But the above does not show "additive Guassian errors" and so is not as convenient.
+
+NOTE: The $\sigma^2$ above the standard deviation of the residuals, which is covered later.  This can be confusing.
+
+Remember the least squares estimate of the parameters:
+
+$$\hat{\beta}_1 = Cor(Y, X)\frac{S_y}{S_x}$$
+
+And
+
+$$\hat{\beta}_0 = \bar{Y} - \hat{\beta}_1 X_i$$
+
+### Interpreting regression coefficients, the intercept
+
+When the predictor is zero, our estimate of the response is:
+
+$$E[Y|X=0] = \beta_0 + \beta_1 * 0 = \beta_0$$
+
+This is the intercept.  But the intercept isn't always of interest; the height of a child for a parent with zero height makes no sense.
+
+It is possible to "make your intercept more interpretable":  by shifting all of the predictor values.  We've seen an example where we have regression through the mean.  This does not affect the slope, but now the intercept is significant.
+
+$$Y_i = \beta_0 + \beta_1 X_i + \epsilon_i = \beta0 + \alpha\beta_1 + \beta1(X_i- \alpha) + \epsilon_i = \tilde{\beta}_0 + \beta_1(X_i - \alpha) + \epsilon_i$$
+
+The above is an abstract and head-scratching way of saying, "You can shift the predictor by any value, not just the mean" but in our example, $\alpha$ would be $\bar{X}$.
+
+### Interpreting regression coefficients, the slope
+
+$$E[Y | X = x + 1] - E[Y | X = x] = \beta_0 + \beta_1(x + 1) - (\beta_0 + \beta_1 x) = \beta_1$$
+
+The above is a *very* confusing way of saying, "If our slope is $\beta_1$, then for every unit we move to the right on the x-axis, our predicted value for $Y$ goes up by the slope, $\beta_1$."
+
+#### Changing units
+
+$$Y_i = \beta_0 + \beta_1 X_i + \epsilon_i = \beta_0 + \frac{\beta_1}{\alpha} (X_i \alpha) + \epsilon_i = \beta_0 + \tilde(\beta)_1(X_i\alpha) + \epsilon_i$$
+
+The above is a way of saying that you multiply $\beta_1$ by the inverse of the change in units.  For example, if your predictor, $\beta_1$, is in units of kilograms, and you want to change to units of grams, you multiply the predictor values $X$ by $\frac{1}{1000}$.
+
+### Using regression for prediction
+
+"If we would like to guess the outcome of a particular value of the predictor, say $X$, the regression model guesses:""
+
+$$\hat{\beta}_0 + \hat{\beta}_1 X$$
+
+(The use of the word "guess" above is extremely ill-advised.)
+
+### Example
+
+```{r}
+data(diamond)
+g = ggplot(diamond, aes(x = carat, y = price))
+g = g + xlab("Mass (carats)")
+g = g + ylab("Price (SIN $)")
+g = g + geom_point(size = 7, colour = "black", alpha=0.5)
+g = g + geom_point(size = 5, colour = "blue", alpha=0.2)
+g = g + geom_smooth(method = "lm", colour = "black")
+g
+```
+
+Now fit the model:
+
+```{r}
+fit <- lm(price ~ carat, data=diamond)
+coef(fit)
+```
+
+Re-fit, after centering the data:
+
+```{r}
+fit2 <- lm(price ~ I(carat - mean(carat)), data=diamond)
+coef(fit2)
+```
+
+The new intercept shows us the predicted cost of a diamond whose weight is the mean of all observed weights.
+
+Now re-fit again, this time changing the scale of the predictor from carats to tenth of carats:
+
+```{r}
+fit3 <- lm(price ~ I(carat * 10), data=diamond)
+coef(fit3)
+```
+
+Now the increase of price per unit (tenth of carat) is one-tenth of what it was when unit was carat.
+
+Now predict the prices of some diamonds based on weight.
+
+```{r}
+newx <- c(0.16, 0.27, 0.34)
+coef(fit)[1] + coef(fit)[2] * newx
+```
+
+We could also use R's `predict` function.
+
+```{r}
+predict(fit, newdata=data.frame(carat=newx))
+```
+
+### Exercises
+
+1. Fit a linear model to the `father.son` dataset with the father as the predictor and the son as the outcome.  Give a p-value for the slope coefficient and perform the relevant hypothesis test.
+
+```{r}
+fit <- lm(sheight ~ fheight, data=father.son)
+summary(fit)$coefficients[2,4]
+```
+
+The p-value is only a tiny fraction of 0.05, so using a 95% confidence level, we do reject the null hypothesis that $\beta_1=0$, and conclude that the slope is non-zero, and there is some correlation between father's height and son's height.
+
+2. Refer to question 1.  Interpret both parameters.  Recenter the intercept if necessary.
+
+The intercept is 33.88, which indicates that a father with height 0 has a son with height 33.88.  This clearly is invalid and is the result of interpolation.
+
+The slope of 0.514 indicates that, for every additional 1" of height in the father, we predict that the son will have an additional 0.514" of height.
+
+3. Refer to question 1. Predict the son's height if the father's height is 80 inches.  Would you recommend this prediction?  Why or why not?
+
+```{r}
+predict(fit, newdata=data.frame(fheight=80))
+```
+
+I would not, because the maximum observed father's height is about 75, and so we are interpolating.
+
+4. Load the `mtcars` dataset. Fit a linear regression with miles per gallon as the outcome and horsepower as the predictor.   Interpret your coefficients, recenter for the intercept if necessary.
+
+```{r}
+data(mtcars)
+fit <- lm(mpg ~ hp, data=mtcars)
+coef(fit)
+```
+
+The intercept indicates that a vehicle with 0 horsepower gets 30 mpg, which is clearly nonsense.  The slope indicates that for every decrease in horsepower by -0.068, mileage increases by one.
+
+Recenter the data:
+
+```{r}
+fit <- lm(I(mpg - mean(mpg)) ~ I(hp - mean(hp)), data=mtcars)
+coef(fit)
+```
+
+The slope is unchanged, but now the intercept is zero.
+
+The video answer indicates that only the predictor should be re-centered.
+
+```{r}
+fit <- lm(mpg ~ I(hp - mean(hp)), data=mtcars)
+summary(fit)$coef
+```
+
+This shows that the car with mean hp gets about 20 mpg.  We also see that the slope is highly statistically significant.
+
+5. Refer to question 4.  Overlay the fit onto a scatterplot.
+
+```{r}
+fit <- lm(mpg ~  hp, data=mtcars)
+itc <- fit$coefficients[1]
+slope <- fit$coefficients[2]
+ggplot(mtcars, aes(x=hp, y=mpg)) +
+  geom_point(cex=4, alpha=0.5) +
+  geom_smooth(method=lm, se=FALSE, lwd=2)
+```
+
+6. Refer to question 4.  Test the hypothesis of no linear relationship between horespower and miles per gallon.
+
+```{r}
+summary(fit)$coef[2,4]
+```
+
+The p-value for the slope is very low, indicating that there is reason to reject the null hypothesis and conclude that there is a relationship between horsepower and miles per gallon.
+
+7. Refer to question 4.  Predict the miles per gallon for a horsepower of 111.
+
+```{r}
+min(mtcars$hp)
+max(mtcars$hp)
+predict(fit, newdata=data.frame(hp=111))
+```
+
+## Chapter 6. Residuals
+
+### Residual variation
+
+Residuals represent variation unexplained by the model.  Here again is the diamond data, with price as response and carat as predictor/regressor.
+
+```{r}
+g = ggplot(diamond, aes(x = carat, y = price))
+g = g + xlab("Mass (carats)")
+g = g + ylab("Price (SIN $)")
+g = g + geom_point(size = 7, colour = "black", alpha=0.5)
+g = g + geom_point(size = 5, colour = "blue", alpha=0.2)
+g = g + geom_smooth(method = "lm", colour = "black")
+g
+```
+
+Recall the linear model:
+
+$$Y_i = \hat{\beta}_0 + \hat{\beta}_1 X_i + \epsilon_i$$
+
+where we assume that $\epsilon_i ~ N(0, \sigma^2)$.  (The $\sigma^2$ here represents residual variance.)  The observed outcome $Y_i$ corresponds to a predictor $X_i$.  We can label our predicted outcome as $\hat(Y)_i$.  This will fall directly on our model's regression line:
+
+$$\hat(Y)_i = \hat{\beta}_0 + \hat{\beta}_1 X_i$$
+
+The residual is the difference between the observed value and the predicted value:
+
+$$e_i = Y_i - \hat{Y}_i$$
+
+```{r}
+diamond.residuals <- residuals(lm(price ~ carat, data=diamond))
+g = ggplot(diamond, aes(x = carat, y = price))
+g = g + xlab("Mass (carats)")
+g = g + ylab("Price (SIN $)")
+g = g + geom_point(size = 5, fill="blue", color="black", shape=21)
+g = g + geom_smooth(method = "lm", colour = "black")
+for (x in 1:length(diamond$carat)) {
+  g <- g + geom_line(data=data.frame(carat=rep(diamond$carat[x], 2), price=c(diamond$price[x], diamond$price[x] - diamond.residuals[x])), color="red")
+}
+g
+#g = g + geom_line(data=data.frame(carat=rep(diamond$carat, each=2), price=as.vector(rbind(diamond$price, diamond$price + diamond.residuals))))
+
+```
+
+
+Least squares minimizes the sum of the squared residuals, $\sum_{i=1}^n e_i^2$. Note that the residuals, $e$, are observable, while the errors, $\epsilon$, are not.  The residuals can be thought of as estimates of the errors.
+
+### Properties of the residuals
+
+#### Expected value
+
+The expected value of a residual is 0:
+
+$$E[e_i] = 0$$
+
+Confusing statement from the text:
+
+"If an intercept is included, $\sum_{i=1}^n e_i = 0$"
+
+Translation:  If *only* an intercept is included, the sum of the residuals is zero.  This means that the regression line is horizontal.  If that is the case, then we can simply add up the distance (positive or negative) of each residual from the horizontal intercept line, and the sum will be zero.
+
+If both an intercept and a slope is given, then:
+
+$$\sum_{i=1}^n e_i X_i = 0$$
+
+Now, in other words, we must multiply each residual value (positive or negative) with the corresponding X value, and when we sum them all, the result is zero.
+
+Note that there are $n - p$ degrees of freedom, where $p$ is the number of coefficients (including the intercept) in the model.  So for simple linear regression it is $n - 2$.
+
+#### Example
+
+```{r}
+ data(diamond)
+y <- diamond$price; x <- diamond$carat; n <- length(y)
+fit <- lm(y ~ x)
+## The easiest way to get the residuals
+e <- resid(fit)
+## Obtain the residuals manually, get the predicted Ys first
+yhat <- predict(fit)
+## The residuals are y - yhat. Let's check by comparing this
+## with R's build in resid function
+max(abs(e -(y - yhat)))
+## Let's do it again hard coding the calculation of Yhat
+max(abs(e - (y - coef(fit)[1] - coef(fit)[2] * x)))
+```
+
+### Estimating residual variation
+
+The variance of the residuals (for simple linear regression):
+
+$$\hat{\sigma}^2 = \frac{1}{n-2} \sum_{i=1}^n e_i^2 = \sum_{i=1}^n (Y_i - (\hat{\beta}_0 + \hat{\beta}_1 X_i))^2$$
+
+#### Diamond example
+
+````{r}
+y <- diamond$price; x <- diamond$carat; n <- length(y)
+fit <- lm(y ~ x)
+## the estimate from lm
+summary(fit)$sigma
+## directly calculating from the residuals
+sqrt(sum(residuals(fit)^2) / (n - 2))
+````
+
+### Summarizing variation
+
+"The total variation in the response is the variability around an intercept. This is also the variance estimate from a model with only an intercept."
+
+The above is classic Caffo.  I cannot fathom what point he's trying to make.  I'm sure it's fairly simple, and that this is another classic example of how he can obscure a simple concept behind smoke and mirrors.  Anyway:
+
+$$\text{Total variability} = \sum_{i=1}^n (Y_i - \bar{Y}^2$$
+
+The above says that total variability is based on the squared differences between the observed values and the mean of all observed values.  If the model has only an intercept and no slope, then there would be no decomposition of the variability (I think this is the point, anyway).
+
+Next:
+
+$$\text{Regression variability} = \sum_{i=1}^n (\hat{Y}_i - \bar{Y}$$
+
+Total variability:
+
+$$\sum_{i=1}^n (Y_i - \bar{Y})^2 = \sum_{i=1}^n (Y_i - \hat{Y}_i)^2 + \sum_{i=1}^n (\hat{Y}_i - \bar{Y})^2$$
+
+The above takes a little pondering, at last the rightmost term.  The middle term is the regression variability; the sum of the squared differences between what we observed, and what we predicted.  The last term is the unexplained variability; it's any variation between our  predictions, and the mean of the observed values.  Need to internalize this so that it's second nature.
+
+The following shows variability around the intercept only (left) and both the intercept and the slope (right).  Variation around the intercept only is total variation.  Variation around both the intercept and the slope is variation that is not explained by the model.  So the difference in the two is the amount of variation explained by the model.
+
+```{r}
+e = c(resid(lm(price ~ 1, data = diamond)),
+resid(lm(price ~ carat, data = diamond)))
+fit = factor(c(rep("Itc", nrow(diamond)),
+rep("Itc, slope", nrow(diamond))))
+g = ggplot(data.frame(e = e, fit = fit), aes(y = e, x = fit, fill = fit))
+g = g + geom_dotplot(binaxis = "y", dotsize = 1.5, stackdir = "center", binwidth = 20)
+g = g + xlab("Fitting approach")
+g = g + ylab("Residual price")
+g
+```
+
+### R squared
+
+**R squared** is the percentage of the total variability that is explained by the model (by the linear relationship of the response variable with the predictor).
+
+$$R^2 = \frac{\sum_{i=1}^n (\hat{Y}_i - \bar{Y})^2}{\sum_{i=1}^n (Y_i - \bar{Y})^2}$$
+
+* $R^2$ is the percentage of the variation explained by the regression model
+* $0 \le R^2 \le 1$
+* $R^2$ is the sample correlation squared
+* $R^2$ can be a misleading indicator of model fit
+  * Deleting data can inflate it
+  * (For later.) Adding terms to regression model always increases $R^2$.
+
+### Exercises
+
+1. Fit a linear regression model to the `father.son` dataset with the father as the predictor and the son as the outcome.  Plot the son's height (horizontal axis) versus the residuals (vertial axis).
+
+```{r}
+fit <- lm(sheight ~ fheight, data=father.son)
+ggplot(father.son, aes(x=fheight, y=fit$residuals)) +
+  geom_point() +
+  geom_hline(yintercept=0)
+```
+
+Note that the text says to plot the *son's* height on the x-axis, but the video shows plotting the *father's* height on the x-axis.
+
+2. Refer to question 1.  Directly estimate the residual variance and compare the estimate to the output of `lm`.
+
+```{r}
+predictions <- predict(fit)
+estvar <- (1/(nrow(father.son) - 2)) * sum((father.son$sheight - predictions)^2)
+estvar
+summary(fit)$sigma^2
+#Note: the following won't work. Reason is that it expects degrees of freedom to be n-1
+#var(fit$residuals)
+```
+
+3. Refer to question 1.  Give the R squared for this model.
+
+```{r}
+summary(fit)$r.squared
+```
+
+4. Load the `mtcars` dataset.  Fit a linear regression with miles per gallon as the outcome and horespower as the predictor.  Plot horsepower versus the residuals.
+
+```{r}
+fit <- lm(mpg ~ hp, data=mtcars)
+ggplot(mtcars, aes(x=hp, y=fit$residuals)) +
+  geom_point(cex=4, alpha=0.5) +
+  geom_hline(yintercept=0, lwd=2, color="red") +
+  xlab("Horespower") +
+  ylab("Residuals")
+```
+
+5. Refer to question 4.  Directly estimate the residual variance and compare this estimate to the output of `lm`.
+
+```{r}
+sum(fit$residuals^2) / (nrow(mtcars) - 2)
+summary(fit)$sigma^2
+```
+
+5. Refer to question 4. Give the R squared for this model.
+
+```{r}
+summary(fit)$r.squared
+```
+
+## Chapter 7. Regression Inference
+
+### Reminder of the model
+
+The regression model so far: 
+
+$$Y_i = \beta_0 + \beta_1X_i + \epsilon_i$$
+
+where $\epsilon \tilde{} N(0, \sigma^2)$.
+
+(Note that some notation for distributions shows variance as the second term, as here; others show standard deviation, as in the DASI textboook.)
+
+The estimates for the model parameters are:
+
+$$\hat{\beta}_0 = \bar{Y} - \hat{\beta}_1\bar{X}$$
+
+$$\hat{\beta}_1 = Cor(Y, X) \frac{Sd(Y)}{Sd(X)}$$
+
+### Review
+
+Consider statistics like the following:
+
+$$\frac{\hat{\theta} - \theta}{\hat{\sigma}_{\hat{\theta}}}$$
+
+where $\hat{\theta}$ is an estimate of interest, $\theta$ is an estimand (the thing whose true value we cannnot know, but are estimating), and $\hat{\sigma}_{\hat{\theta}}$ is the standard error of $\hat{\theta}$.
+
+This is reminiscent of determining the Z-score for a hypothesis test:
+
+$$\frac{\text{point estimate} - \text{null value}}{\text{SE}}$$
+
+Such a statistic has these properties:
+
+1. They are normally distributed and have a finite sample Student's T distribution under normality assumptions.
+2. They can be used to test $H_0: \theta = \theta_0$ versus $H_A: \theta >, <, \ne \theta_0$.
+3. They can be used to create a confidence interval for $\theta$ via $\hat{\theta} \pm Q_{1-\alpha/2}\hat{\sigma}_{\hat{\theta}}$
+
+Point 1 is somewhat confusing, but what I believe it means is that the sampling distribution is to be expected to be distributed under the Student's distribution.  So if you have a collection of samples, and you calculate the above statistic for each, they follow the Student's distribution for the appropriate degrees of freedom, based on sample size.
+
+Point 2 uses $\theta$ as the point estimate and $\theta_0$ as the null value.
+
+Point 3 is straightforward for me.  $\alpha$ is the significance level, which is 1 minus the confidence level.  It is divided in half because we're assuming that a confidence interval is always two-sided, so we want half of the significance level of each side of the distribution.
+
+### Results for the regression parameters
+
+**NOTE**: The book begins by saying "First, we need the standard errors for our regression parameters" and then goes on to define the *variance* for $\hat{\beta}_1$ and $\hat{\beta}_0$.  These are *not* the standard errors.  This is an egregious, unpardonable error; another example of why I was so irritated by this course in the first attempt.
+
+~~Standard errors~~ variances for regression parameters:
+
+$$\sigma^2_{\hat{\beta}_1} = Var(\hat{\beta}_1) = \sigma^2 / \sum_{i=1}^n (X_i - \bar(X))^2$$
+
+And
+
+$$\sigma^2_{\hat{\beta}_0} = Var(\hat{\beta}_0) = \left( \frac{1}{n} + \frac{\bar{X}^2}{\sum_{i=1}^n (X_i - \bar{X}^2} \right) \sigma^2$$
+
+Where $\sigma^2$ is the variance of the residuals:
+
+$$Var(e) = \frac{1}{n-2} \sum_{i=1}^n e_i^2 = \frac{1}{n-2} \sum_{i=1}^n \left( Y_i - (\hat{\beta}_0 + \hat{\beta}_1 X_i)^2 \right)$$
+
+(Note that this is `coefficients(fit)$sigma` where `fit` is the output of `lm`.)
+
+### Example diamond data set
+
+Calculate by hand:
+
+```{r}
+y <- diamond$price; x <- diamond$carat; n <- length(y)
+beta1 <- cor(y, x) * sd(y) / sd(x)
+beta0 <- mean(y) - beta1 * mean(x)
+e <- y - beta0 - beta1 * x
+sigma <- sqrt(sum(e^2) / (n-2))
+ssx <- sum((x - mean(x))^2)
+```
+
+Now calculate standard errors:
+
+```{r}
+seBeta0 <- (1 / n + mean(x) ^ 2 / ssx) ^ .5 * sigma
+seBeta1 <- sigma / sqrt(ssx)
+tBeta0 <- beta0 / seBeta0
+tBeta1 <- beta1 / seBeta1
+```
+
+`tBeta0` and `tBeta1` above correspond to "t-scores" (using a Student's distribution) for the two parameters.
+
+Now obtain the p-values:
+
+```{r}
+pBeta0 <- 2 * pt(abs(tBeta0), df = n - 2, lower.tail = FALSE)
+pBeta1 <- 2 * pt(abs(tBeta1), df = n - 2, lower.tail = FALSE)
+coefTable <- rbind(c(beta0, seBeta0, tBeta0, pBeta0), c(beta1, seBeta1, tBeta1, pBeta1))
+colnames(coefTable) <- c("Estimate", "Std. Error", "t value", "P(>|t|)")
+rownames(coefTable) <- c("(Intercept)", "x")
+coefTable
+```
+
+Now do all of this the fast, simple way:
+
+```{r}
+fit <- lm(y ~ x)
+summary(fit)$coefficients
+```
+
+### Getting a confidence interval
+
+For the intercept:
+
+```{r}
+sumCoef <- summary(fit)$coefficients
+sumCoef[1,1] + c(-1, 1) * qt(.975, df = fit$df) * sumCoef[1, 2]
+```
+
+And for the slope:
+
+```{r}
+(sumCoef[2,1] + c(-1, 1) * qt(.975, df = fit$df) * sumCoef[2, 2]) / 10
+```
+
+### Prediction of outcomes
+
+We've already covered that the estimate for prediction at point $x_0$ is:
+
+$$\hat{\beta}_0 + \hat{\beta}_1 x_0$$
+
+We need a standard error to create a prediction interval.  **There is an important but subtle distinction between intervals for the regression line at point $x_0$ and the prediction of what $y$ would be at point $x_0$.**  What differes is the standard error.
+
+For the line at $x_0$ the standard error is:
+
+$$\hat{\sigma} \sqrt{\frac{1}{n} + \frac{(x_0 - \bar{X})^2}{\sum_{i=1}^n (X_i - \bar{X})^2}}$$
+
+For the prediction interval at $x_0$ the standard error is:
+
+$$\hat{\sigma} \sqrt{1 + \frac{1}{n} + \frac{(x_0 - \bar{X})^2}{\sum_{i=1}^n (X_i - \bar{X})^2}}$$
+
+> "Notice that the prediction interval standard error is a little large than error for a line. Think of it this way. If we want to predict a Y value at a particular X value, and we knew the actual true slope and intercept, there would still be error. However, if we only wanted to predict the value at the line at that X value, there would be no variance, since we already know the line.
+
+> Thus, the variation for the line only considers how hard it is to estimate the regression line at that X value. The prediction interval includes that variation, as well as the extra variation unexplained by the relationship between Y and X. So, it has to be a little wider."
+
+In R, using ggplot:
+
+```{r}
+newx = data.frame(x = seq(min(x), max(x), length = 100))
+p1 = data.frame(predict(fit, newdata= newx,interval = ("confidence")))
+p2 = data.frame(predict(fit, newdata = newx,interval = ("prediction")))
+p1$interval = "confidence"
+p2$interval = "prediction"
+p1$x = newx$x
+p2$x = newx$x
+dat = rbind(p1, p2)
+names(dat)[1] = "y"
+g = ggplot(dat, aes(x = x, y = y))
+g = g + geom_ribbon(aes(ymin = lwr, ymax = upr, fill = interval), alpha = 0.2)
+g = g + geom_line()
+g = g + geom_point(data = data.frame(x = x, y=y), aes(x = x, y = y), size = 4)
+g
+```
+
+### Exercises
+
+1. Test whether the slope coefficient for the `father.son` dataset is different from zero (father as predictor, son as outcome).
+
+```{r}
+fit <- lm(sheight ~ fheight, data=father.son)
+summary(fit)$coefficients[2,4]
+```
+
+Value is very small, so we conclude that we reject the null hypothesis that the slope is zero.
+
+2. Refer to question 1.  Form a confidence interval for the slope coefficient.
+
+```{r}
+n <- nrow(father.son)
+z.star <- pt(0.975, lower.tail=FALSE, df=n-2)
+se <- summary(fit)$coefficients[2,2]
+point.est <- summary(fit)$coefficients[2,1]
+ci <- point.est + c(-1,1) * point.est * se
+ci
+```
+
+3. Refer to question 1.  Form a confidence interval for the intercept (center the fathers' heights first to get an intercept that is easier to interpret).
+
+```{r}
+n <- nrow(father.son)
+x <- father.son$fheight - mean(father.son$fheight)
+y <- father.son$sheight
+fit <- lm(y ~ x)
+z.star <- pt(0.975, lower.tail=FALSE, df=n-2)
+point.est <- summary(fit)$coefficients[1,1]
+se <- summary(fit)$coefficients[1,2]
+ci <- point.est + c(-1, 1) * point.est * se
+ci
+```
+
+4. Refer to question 1.  Form a mean value interval for the expected son's height at the average father's  height.
+
+```{r}
+n <- nrow(father.son)
+fit <- lm(sheight ~ fheight, data=father.son)
+z.star <- pt(0.975, lower.tail=FALSE, df=n-2)
+predict(fit, newdata=data.frame(fheight=mean(father.son$fheight)), interval="confidence")
+```
+
+5. Refer to question 1.  Form a prediction interval for the expected son's height at the average father's  height.
+
+```{r}
+n <- nrow(father.son)
+fit <- lm(sheight ~ fheight, data=father.son)
+z.star <- pt(0.975, lower.tail=FALSE, df=n-2)
+predict(fit, newdata=data.frame(fheight=mean(father.son$fheight)), interval="predict")
+```
+
+6. Load the `mtcars` dataset.  Fit a linear regression with miles per gallon as the outcome and horespower as the predictor.  Test whether or not the horsepower coefficient is statistically different from zero.  Interpret your test.
+
+```{r}
+data(mtcars)
+fit <- lm(mpg ~ hp, data=mtcars)
+summary(fit)$coefficients[2,4]
+```
+
+The p-value is very small so we conclude that there is a relationship between horsepower and miles per gallon.
+
+7. Refer to question 6. Form a confidence interval for the slope coefficient.
+
+```{r}
+fit <- lm(mpg ~ hp, data=mtcars)
+z.star <- pt(0.975, lower.tail=FALSE, df=nrow(mtcars) - 2)
+point.est <- summary(fit)$coefficients[2,1]
+se <- summary(fit)$coefficients[2,2]
+ci <- point.est + c(-1,1) * z.star * se
+ci
+```
+
+8. Refer to question 6.  Form a confidence interval for the intercept (center the `hp` variable first).
+
+```{r}
+y <- mtcars$mpg
+x <- mtcars$hp - mean(mtcars$hp)
+fit <- lm(y ~ x)
+point.est <- summary(fit)$coefficients[1,1]
+se <- summary(fit)$coefficients[1,2]
+ci <- point.est + c(-1,1) * z.star * se
+ci
+```
+
+For the car with average horsepower, we are 95% confident that mpg is between 19.98 and 20.21.
+
+9. Refer to question 6.  Form a mean value interval for the expected MPG for the average HP.
+
+```{r}
+fit <- lm(mpg ~ hp, data=mtcars)
+predict(fit, newdata=data.frame(hp=mean(mtcars$hp)), interval="confidence")
+```
+
+10. Refer to question 6.  Form a prediction interval for the expected MPG for the average HP.
+
+```{r}
+fit <- lm(mpg ~ hp, data=mtcars)
+predict(fit, newdata=data.frame(hp=mean(mtcars$hp)), interval="predict")
+```
+
+11. Refer to question 6.  Create a plot that has the fitted regression line plus the curves at the expected value and prediction intervals.
+
+```{r}
+x <- mtcars$hp
+y <- mtcars$mpg
+fit <- lm(y ~ x)
+newx = data.frame(x = seq(min(x), max(x), length = 100))
+p1 = data.frame(predict(fit, newdata= newx,interval = ("confidence")))
+p2 = data.frame(predict(fit, newdata = newx,interval = ("prediction")))
+p1$interval = "confidence"
+p2$interval = "prediction"
+p1$x = newx$x
+p2$x = newx$x
+dat = rbind(p1, p2)
+names(dat)[1] = "y"
+g = ggplot(dat, aes(x = x, y = y))
+g = g + geom_ribbon(aes(ymin = lwr, ymax = upr, fill = interval), alpha = 0.2)
+g = g + geom_line()
+g = g + geom_point(data = data.frame(x = x, y=y), aes(x = x, y = y), size = 4)
+g
+```
+
+## Chapter 8. Multivariable Regression Analysis
+
+#### Multivariable regression analyses: adjustment
+
+A multivariable model may contain invalid predictors.  Adjustment is the process of removing these invalid predictors.
+
+#### Multivariable regression analyses: prediction
+
+The goal is to generalize simple linear regression to work with multiple predictors.  We must be careful to include all predictors that are significant, and exclude all that are not.
+
+### The linear model
+
+$$Y_i = \beta_1X_{1i} + \beta_2X_{2i} + ... + \beta_pX_{pi} + \epsilon_i = \sum_{i=1}^n X_{ik}\beta_k + \epsilon_i$$
+
+(**NOTE**: Textbook shows $\beta_j$ in the rightmost term, which can't be right.  Careless error.)
+
+Here, $X_{1i}$ is typically 1 (note: when would it not be?!?), so that an intercept is included.  Least squares minimizes:
+
+$$\sum_{i=1}^2 \left( Y_i - \sum_{k=1}^p X_{ki} \beta_k \right)$$
+
+(Again, the textbook shows $\beta_j$.  The accompanying video shows it but says nothing specific about it.)
+
+Important note: the linearity in linear regression is in the fact that the coefficients $\beta$ are constant for all observations.  The observations themselves may be raised to exponents, or log transformmed, etc., but it is still linear regression.
+
+### Estimation
+
+Recall the least squares estimate for regression through the origin, $E[Y_i] = X_i\beta_1$, was $\sum X_i Y_i / /sum X_i^2$.  **NOTE**: The phrasing is terribly awkward here.  $\sum X_i Y_i / \sum X_i^2$ is the  estimate for the slope.  So the estimate for the slope, when the regression line is forced through the origin, is what is meant by "the least squares estimate for regression through the origin."  It's not terribly clear why this point is even made.  The text goes on to say that we can use residuals to regress the other variables out of both the regressor and the response, but not clear picture is created of just what this means, and how it relates to the above.
+
+(Also remember that the slope for regression is $Cor(Y,X) S_y/S_x$, which is equal to $\sum[(X_i-\bar{X})(Y_i-\bar{Y})]/\sum(X_i-\bar{X})^2$, and when you've centered the data (that's the flavor of "regression through the origin" being referred to here), this is the same as $\sum(X_iY_i)/\sum(X_i^2$).
+
+Consider two regressors, $E[Y_i] = X_{1i}\beta_1 + X_{2i}\beta_2 = \mu_i$. Least squares tries to minimize:
+
+$$\sum_{i=1}^n (Y_i - X_{1i}\beta_1 + X_{2i}\beta_2)^2$$
+
+
+**INTERVENING MATERIAL** from video lecture.
+
+Fix $X_1i$ for the purpose of illustration.  Therefore:
+
+$$\tilde{Y_i} = Y_i - X_{2i}\beta_2$$
+
+And therefore we now want to minimize:
+
+$$\sum_{i=1}^n (\tilde{Y_i} - X_{2i}\beta_2)^2$$
+
+"Well...(long pause)...then this is exactly through the origin with just the single regressor, $X_{2i}$, but the outcome $\tilde{Y_i}$".  Therefore:
+
+$$\beta_2 = \frac{\sum \tilde{Y_i} X_{2i}}{\sum X_{2i}^2}$$
+
+You can now plug this back into the previous equation, and find a solution that only involves $\beta_1$.
+
+And yes, this is apparently meant to try to clarify things.
+
+"What it works out to be, and this is the interesting part, is that the regression slope for $\beta_1$ is exactly what you would obtain if you took the residual of $X_2$ out of $X_1$ and $X_2$ out of $Y$, and then just did regression through the origin."
+
+**And yes, this is apparently meant to try to clarify things.**
+
+### Result
+
+$$\hat{\beta}_1 = \frac{\sum_{i=1}^n e_{i,Y|X_2}e_{i,X_1|X_2}}{\sum_{i=1}^n e_{i,X_1|X_2}}^2$$
+
+> "That is, the regression estimate for $\beta_1$ is the regression through the origin estimate having regressed $X_2$ out of both the response and the predictor."
+
+> "(Similarly, the regression estimate for $\beta_2$ is the regression through the origin estimate having regressed $X_1$ out of both the response and the predictor."
+
+> "More generally, multivariable regression estimates are exactly those having removed the linear relationship of the other variables from the regressor and the response."
+
+**END INTERVENING MATERIAL**
+
+(Note that the above corresponds roughly to the following.)
+
+Estimate for slope:
+
+$$\frac{\sum_{i=1}^n e_{i,Y|X_2} e_{i,X_1|X_2}}{\sum_{i=1}^n e_{i,X_1|X_2}^2}$$
+
+The above gave me great puzzlement but in effect, what it says is that that the slope for the first regressor is the variability in $Y$ with $X_1$, once we've regressed out $X_2$, divided by the squared variability of $X_1$, once we've regressed out $X_2$.
+
+**NOTE** the worst error in the textbook so far:
+
+"where $e_{i,Y|X_2}$ is the residual having fit $X_2$ on $Y$ and $e_{i,X_1|X_2}$ is the residual having fit $X_2$ ~~on Y~~ **on X1**".  I think this textbook was largely thrown together in a weekend and not even the most cursory attempt was made to proofread it, much less to get a professional editorial eye on it.  **Terrible**.  I didn't pay for it, and I don't intend too.
+
+### Example with two variables, simple linear regression
+
+Linear regression model:
+
+$$Y_i = \beta_1X_{1i} + \beta_2X_{2i}$$
+
+where $X_{2i} = 1$ is an intercept term.  (We're fixing it to 1 for the purpose of demonstration.)  Since this is "intercept-only regression" (why the hell this is true, I don't know), we know $\beta_2 = \bar{Y}$.  The residuals are $e_{i,Y|X_2}=Y_i - \bar{Y}$.  "In other words, the centered version of $Y_i$."  Why the hell this is assumed, I don't know.
+
+"So getting rid of this intercept term from the $Y$ is just centering that variable, and getting rid of this intercept term from $X_1$ is just centering that covariate."
+
+So it's regression through the origin, or regression without an intercept, or centering, or some other damn thing.
+
+The estimate for $\beta_1$ therefore is:
+
+$$\hat{\beta}_1 = \frac{\sum_{i=1}^n e_{i,Y|X_2} e_{i,X_1|X_2}}{\sum_{i=1}^n e_{i,X_1|X_2}^2} = Cor(X,Y)\frac{S_y}{S_x}$$
+
+Which agrees with our earlier finding.
+
+I do at least follow the above, although this much is not spelled out explicitly:
+
+$$Cor(X,Y)\frac{S_y}{S_x} = \frac{Cov(X,Y)}{S_xS_y} \frac{S_y}{S_x$} = \frac{Cov(X,Y)}{S_x^2} = \frac{\sum_{i=1}^n (X_i - \bar{X})(Y_i - \bar{Y})}{\sum_{i=1}^n(X_i - \bar{X})^2}$$ 
+
+### The general case
+
+In the general case with $p$ regressors (**NOTE**: this includes the intercept!), least squares have to minimize:
+
+$$\sum_{i=1}^n (Y_i - X_{1i}\beta_1 - ... - X_{pi}\beta_p)^2$$
+
+### Simulation
+
+```{r}
+n <- 100; x <- rnorm(n); x2 <- rnorm(n); x3 <- rnorm(n)
+# Generate the data
+y <- 1 + x + x2 + x3 + rnorm(n, sd=0.1)
+# Get the residuals having removed X2 and X3 from X1 and Y
+ey <- resid(lm(y ~ x2 + x3))
+ex <- resid(lm(x ~ x2 + x3))
+# Fit the regression through the origin with the residuals
+sum(ey * ex) / sum(ex^2)
+# Double check with lm
+coef(lm(ey ~ ex - 1))
+# Fit the full linear model to show it agrees
+coef(lm(y ~ x + x2 + x3))
+```
+
+### Interpretation of the coefficients
+
+Predicted mean for a given set of values of the regressors:
+
+$$E[Y|X_1=x_1, ... X_p = x_p] = \sum_{k=1}^p x_k\beta_k$$
+
+Now consider incrementing $X_1$ and only $X_1$ by 1.
+
+$$E[Y|X_1=x_1+1, ...X_p=x_p] = (x_1 + 1)\beta_1 + \sum_{k=2}^p x_k\beta_k$$
+
+Now subtract the two equations:
+
+$$E[Y|X_1=x_1+1, ...X_p=x_p] - E[Y|X_1=x_1, ... X_p = x_p] = (x_1 + 1)\beta_1 + \sum_{k=2}^p x_k\beta_k - \sum_{k=1}^p x_k\beta_k$$
+
+**NOTE**:  The textbook shows the two sums being **added** rather than **subtracted**.  And the video takes no notice of this.
+
+> "Thus, the interpretation of a multivariate regression coefficient is the expected change in the
+response per unit change in the regressor, holding all of the other regressors fixed."
+
+### Fitted values, residuals and residual variation
+
+All SLR quantities can be extended to (multiple) linear models. Our statistical model:
+
+$$Y_i = \sum_{k=1}^p X_{ik}\beta_k + \epsilon_i$$
+
+where $\epsilon \tilde{} N(0, \sigma^2)$. Our fitted responses are:
+
+$$\hat{Y}_i = \sum_{k=1}^p X_{ik}\hat{\beta}_k$$
+
+Residuals are defined exactly as in SLR:
+
+$$e_i = Y_i - \hat{Y}_i$$
+
+Variance estimate:
+
+$$\hat{\sigma}^2 = \frac{1}{n-p} \sum_{i=1}^n e_i^2$$
+
+**NOTE** that this is the residual variance.
+
+To get predicted responses at at new values, $x_1, ... x_p$, simply plug them into the linear model $\sum_{k=1}^p x_{ki}\hat{\beta}_k$.
+
+Coefficients have standard errors, $\hat{\sigma}_{\hat{\beta}_k}$, and:
+
+$$\frac{\hat{\beta}_k - \beta_k}{\hat{\sigma}_{\hat{\beta}_k}}$$
+
+follows a t distribution with $n-p$ degrees of freedom.  Predicted responses have standard errors and we can calculate predicted and expected response intervals.
+
+(I think "predicted" above means `interval="predict"` in the R `predict` function and "expected" means `interval="confidence"`.)
+
+### Summary notes on linear models
+
+* Linear models are by far the single most important applied statistical and ML learning technique
+* Some amazing things you can accomplish with linear models
+  * Decompose a signal into its harmonics
+  * Flexibly fit complicated functions
+  * Fit factor variables as vectors
+  * Uncover complex multivariate relationships with the response
+  * Build accurate prediction models
+
+### Exercises
+
+1. Load the dataset `Seatbelts` as part of the `datasets` package via `data(Seatbelts)`. Use `as.data.frame` to convert the object to a dataframe.  Fit a linear model of driver deaths with `kms` and `PetrolPrice` as predictors. Interpret your results.
+
+```{r}
+data(Seatbelts)
+sbelts <- as.data.frame(Seatbelts)
+fit <- lm(DriversKilled ~ kms + PetrolPrice, data=Seatbelts)
+summary(fit)
+```
+
+The results show that the number of drivers killed has significant negative linear relationships with both kms and PetroPrice.  Neither seem to make sense.  The more distance driven, the more we would expect drivers killed to increase.  We would not expect petrol price to have any relationship with drivers killed.  The help for the data points out that the point of the study was to measure deaths and injuries before and after a law was enacted requiring the use of seat belts.  Also, kms may be correlated to other things, for example, a low number might indicate many shorter trips as opposed to fewer long ones.
+
+Further exploration of the data is needed.
+
+The video shows standardizing the petrol price, which is not a "true" price but some indexed value anyway.  And scalling kms by dividing by 1000.  The overall picture doesn't change however--more deaths as petrol price goes down and as kilometers driven goes down.
+
+2. Predict the number of driver deaths at the average `kms` and `petrol` levels.
+
+```{r}
+predict(fit, newdata=data.frame(kms=mean(sbelts$kms), PetrolPrice=mean(sbelts$PetrolPrice)))
+```
+
+3. Take the residuals for `DriversKilled` having regressed out `kms` and an intercept, and the residual for `PetrolPrice`  having regressed out `kms` and an intercept.  Fit a regression through the origin of the two residuals and show that it is the same as your coefficient obtained in question 1.
+
+```{r}
+fitFull <- lm(DriversKilled ~ kms + PetrolPrice, data=Seatbelts)
+fit1 <- lm(DriversKilled ~ kms, data=Seatbelts)
+fit2 <- lm(PetrolPrice ~ kms, data=Seatbelts)
+resid1 <- fit1$residuals - mean(fit1$residuals)
+resid2 <- fit2$residuals - mean(fit2$residuals)
+fit3 <- lm(resid1 ~ resid2 -1)
+fitFull$coef
+fit3$coef
+```
+
+**NOTE** I found this confusing.  The terminology indicated that, when I fit a model for DriversKilled with kms regressed out, I should not have an intercept **at that point**, and same for fitting PetrolPrice with kms regressed out.  I'm not sure now what it means by "and an intercept."  The "-1" in the model for fit3 was simply to remove the intercept; it had no effect on the slope coefficient.  So why did it not work if I put "-1" in fit1 and fit2?  I don't know yet.
+
+4. Take the residual for `DriversKilled` having regressed out `PetrolPrice` and an intercept. Take the residual for `kms` having regressed out `PetrolPrice` and an intercept.  Fit a regression through the origin of the two residuals and show that it is the same as your coefficient obtained in question 1.
+
+```{r}
+fitFull <- lm(DriversKilled ~ kms + PetrolPrice, data=Seatbelts)
+fit1 <- lm(DriversKilled ~ PetrolPrice, data=Seatbelts)
+fit2 <- lm(kms ~ PetrolPrice, data=Seatbelts)
+resid1 <- fit1$residuals - mean(fit1$residuals)
+resid2 <- fit2$residuals - mean(fit2$residuals)
+fit3 <- lm(resid1 ~ resid2 -1)
+fitFull$coef
+fit3$coef
+```
+
+## Chapter 9. Multivariable examples and tricks
+
+### Data set for discussion
+
+The textbook makes no mention of it, but the  video shows that a library called GGally is used in conjunction with ggplot2 to do a plot matrix.  Unfortunatley the package has changed since then, and the so-called "help" on how to deal with the change is useless. Googling turns up nothing.  Also, the pairs plot shown in the video is different from that in the book, so maybe the book really does just use the base plot command.
+
+```{r}
+require(datasets)
+data(swiss)
+#g = ggpairs(swiss, lower=list(continuous = "smooth"), params=c(method = "loess"))
+g = ggpairs(swiss, lower=list(continuous = "smooth"))
+g
+```
+
+The main thing to get from the matrix plot for now is that fertility appers to have a positive correlation with agriculture of about 0.353, as shown in the plot for those two variables.
+
+```{r}
+plot(swiss)
+summary(lm(Fertility ~ ., data=swiss))
+```
+
+For the above, the makes some nearly-incomprehensible statement about showing fertility modeled against all predictors only for illustrative purposes, and "normally" you would model only fertility and agriculture?  Why?  It is lost in the mysteries of time.  He also uses the phrase "marginal relationship" without explaining it, but it is clear here that it means a relationship between an outcome and just one predictor.
+
+From the video, re the above `lm` summary output:
+
+"Our models estimate an expected 0.17 decrease in standardized fertility for every 1% increase in percentage of males involved in agriculture in holding the remaining variables constant."
+
+Looking at the remaining data, we can set up a hypothesis of $H_0: \beta_{\text{Agri}} = 0$ and $H_A: \beta_{\text{Agri}} \ne 0$.  Based on the p-value being less than 0.05, we can reject the null hypothesis and conclude that $\beta{\text{Agri}}$ is non-zero.
+
+```{r}
+summary(lm(Fertility ~ Agriculture, data=swiss))
+```
+
+Key observation so far:  The sign of the slope coefficient for agriculture was reversed from the full model to the model examining agriculture alone (although its magnitude is about the same).  This is known as "Simpson's Paradox."  It points out that unadjusted and adjusted effects can have opposite signs.
+
+Also note that the agriculture predictor is again statistically significant, going by the p-value.
+
+### Simulation study
+
+```{r}
+set.seed(1)
+n <- 100
+x2 <- 1:n
+x1 <- 0.01 * x2 + runif(n=n, min=-0.1, max=0.1)
+y <- -x1 + x2 + rnorm(n, sd=0.1)
+summary(lm(y~x1))$coefficients
+summary(lm(y ~ x1 + x2))$coefficients
+
+dat = data.frame(y = y, x1 = x1, x2 = x2, ey = resid(lm(y ~ x2)), ex1 = resid(lm(x1 ~ x2)))
+library(ggplot2)
+
+g = ggplot(dat, aes(y = y, x = x1, colour = x2))
+g = g + geom_point(colour="grey50", size = 5) + geom_smooth(method = lm, se = FALSE, colour = "black") 
+g = g + geom_point(size = 4) 
+g = g + ggtitle("Unadjusted, color is X2")
+g = g + xlab("x1")
+g = g + ylab("y")
+
+g2 = ggplot(dat, aes(y = ey, x = ex1, colour = x2))  
+g2 = g2 + geom_point(colour="grey50", size = 5) + geom_smooth(method = lm, se = FALSE, colour = "black") + geom_point(size = 4) 
+g2 = g2 + ggtitle("Adjusted, color is X2")
+g2 = g2 + xlab("resid(lm(x1 ~ x2))")
+g2 = g2 + ylab("resid(lm(y ~ x2))")
+
+grid.arrange(g, g2, ncol=2)
+```
+
+We can see that the `x1` variable is a small fraction of `x2`, with some jitter added, and when the model is built, we use the negative of `x1`.  So in effect, `x1` in the model is 
+
+The analogy given in the video is that x2 can be thought of as days, over time, and x1 can be thought of as your bank account, and y represents happiness.  So the model suggests that, as time goes by, you grow happier, but as your bank account increases, you grow unhappier.
+
+So the story is that your bank account grows over time, in a positive, linear trend.  If you  build a model comparing y to x1 alone, the slope coefficient is a very large positive number, very much the opposite of what we might expect.
+
+"And  what's happening?  It's sort of picking up the residual effect of x2".
+
+If we next look at the full model, then the sign for x1 is negative as expected.
+
+My explanation:  x1 was made a small fraction of x2.  y rises over time, in spite of the negative contribution of x1.  Levels of happiness increase over time *in spite of* rather than *because of* the rising bank account.  There is a confounding variable in y.  That is why, when we build a model with only y and x1, it appears that x1 has a positive correlation with y.  In fact, x1 *does* have a positive correlation with y, but only because there is another confounding variable at work.  When this confounding variable is added into the model (thus "adjusting"), then we see that, once its variability is removed from the relationship of y and x1, x1 has a negative correlation with y.
+
+**The lesson** here is that there are features that, when examined alone, do not give an accurate picture.
+
+### Back to this data set
+
+"This" means the `swiss` dataset.
+
+* The sign for agriculture reverses with the inclusion of examination and education
+* The percent of males in a province working in agriculture is negatively related to eduational attainment (correlation of -0.6395) and Education and Examination (correlation of 0.6984) are obviously measuring similar things.
+
+```{r}
+cor(swiss$Agriculture, swiss$Education)
+cor(swiss$Education, swiss$Examination)
+```
+
+  * Is the positive marginal an artifact for not having accounted for education level? (Education does have a stronger effect, by the way).  **Translation**: the "positive marginal artifact" is the correlation of fertility with agriculture alone.  "Education does have a stronger effect" is a way of saying that education is a confounding variable, and because it is larger in effect, it swamps agriculture.  The phrase "by the way" is rather sly and unfortunately misleading.  It is the fact that education has a stronger effect that **is the whole point**.  It is the reason that x2 is a confounding variable that swaps the sign of the x1 slope coefficient.
+
+* At the minimum, anyone claiming that provinces are more agricultural have higher fertiity rates would immediately be oppen to criticism.
+
+My own sidenote:  Go back to the simulated data above for a moment.  x1 was made much smaller than x2.  What if it is larger?
+
+```{r}
+set.seed(1)
+n <- 100
+x2 <- 1:n
+x1 <- 10 * x2 + runif(n=n, min=-0.1, max=0.1)
+y <- -x1 + x2 + rnorm(n, sd=0.1)
+summary(lm(y~x1))$coefficients
+summary(lm(y ~ x1 + x2))$coefficients
+```
+
+Now the slope coefficient is negative whether we have adjusted for x2 or not.  I can hear my favorite lobster say, "Now Zoidberg is on top!"
+
+This section has brought me a key, and deep, understanding of a key point and I now relax some of my criticism of the material of the course.  It is still too difficult to understand, thanks to errors and obscurities, but there are gems within it, and this is one of them.  Admittedly (and surprisingly!) it was the video that really drove home the point.
+
+**QUESTION**: Shouldn't variables be centered and normalized?  Wouldn't that vastly reduce or eliminate this sort of problem?
+
+### What if we include a completely unnecessary variable?
+
+**NOTE**:  "completely unnecessary" here does not mean a variable that is completely unrelated, i.e., random noise.  That is addressed later. Instead, it means, for example, a variable that is a linear combination of two of the other variables in the model.  So there is confounding and collinearity.  The new variable "adds no new information."
+
+```{r}
+z <- swiss$Agriculture + swiss$Education
+lm(Fertility ~ . + z, data=swiss)
+```
+
+Note the `NA` for `z`.  R is smart enough to recognize that a variable is merely a linear combination, and so does not include it in the model.
+
+Note however that even a small amount of jitter/noise in the new variable is enough for it to be included:
+
+```{r}
+z2 <- jitter(z, factor=0.1)
+lm(Fertility ~ . + z2, data=swiss)
+```
+
+Oddly, as the differences between a true linear combination and `z2` get smaller, the slope coefficient (regardless of sign) for `z2` gets larger, until we hit some kind of threshold where the differences are so tiny that the coefficient is again `NA`:
+
+```{r}
+z2 <- jitter(z, factor=0.01)
+lm(Fertility ~ . + z2, data=swiss)
+z2 <- jitter(z, factor=0.0001)
+lm(Fertility ~ . + z2, data=swiss)
+```
+
+### Dummy variables are smart
+
+Consider the linear model:
+
+$$Y_i = \beta_0 + X_{i1}\beta_1 + \epsilon_i$$
+
+where each $X_{i1}$ is binary (1=in group, 0=not in group)
+
+Then for people in the group, $E[Y_i]=\beta_0 + \beta_1$, and for people not in the group, $E[Y_i] = \beta_0$.  The least squares fits work out to be $\hat{\beta}_0 + \hat{\beta}_1$ is the mean for those in the group, and $\hat{\beta}_0$ is the mean for those not in the group.
+
+$\beta_1$ is interpreted as the increase or decrease in the mean comparing those in the group to those who were not.
+
+Note that including a (separate) binary variable that is 1 for those not in the group  would be redundant.  There would be three parameters to describe two means.  (The three parameters would be those with a 1 for the first variable, those with a 1 for the second variable, and those without a 1 in either.)
+
+### More than two levels
+
+Consider a multilevel factor.  Assume it has three levels, e.g., Republican, Democrat or independent.
+
+$$Y_i = \beta_0 + X_{i1}\beta_1 + X_{i2}\beta_2 + \epsilon_i$$
+
+$X_{i1}$ is 1 for Republican and 0 otherwise.  $X_{i2}$ is 2 for Democrat and 0 otherwise.  If $i$ is Republican then $E[Y_i]=\beta_0 + \beta_1$.  If $i$ is Democrat thatn $E[Y_i] = \beta_0 + \beta_2$.  If $i$ is independent then $E[Y_i] = \beta_0$.
+
+$\beta_1$ compares Republicans to independents.  $\beta_2$ compares Democrats to independents.  $\beta_1 - \beta_2$ compares Republicans to Democrats.
+
+(Choice of reference category changes the interpretation.)
+
+### Insect Sprays
+
+TBD
+
+### Summary of dummy variables
+
+TBD
+
+### Other thoughts on this data
+
+TBD
+
+### Further analysis of the swiss dataset
+
+TBD
+
+### Exercises
+
+TBD
+
+## Chapter 10: Adjustment
+
+### Experiment 1
+
+```{r}
+set.seed(1)
+n <- 100; t <- rep(c(0, 1), c(n/2, n/2)); x <- c(runif(n/2), runif(n/2));
+beta0 <- 0; beta1 <- 2; tau <- 1; sigma <- .2
+y <- beta0 + x * beta1 + t * tau + rnorm(n, sd = sigma)
+plot(x, y, type = "n", frame = FALSE)
+abline(lm(y ~ x), lwd = 2, col="red")
+abline(h = mean(y[1 : (n/2)]), lwd = 3)
+abline(h = mean(y[(n/2 + 1) : n]), lwd = 3)
+fit <- lm(y ~ x + t)
+summary(fit)
+abline(coef(fit)[1], coef(fit)[2], lwd = 3)
+abline(coef(fit)[1] + coef(fit)[3], coef(fit)[2], lwd = 3)
+points(x[1 : (n/2)], y[1 : (n/2)], pch = 21, col = "black", bg = "lightblue", cex = 2)
+points(x[(n/2 + 1) : n], y[(n/2 + 1) : n], pch = 21, col = "black", bg = "salmon", cex = 2)
+```
+
+```{r}
+set.seed(1)
+y <- jitter((1:40)^2, 1, 50)
+x <- 1:40
+fit <- lm (y ~ x)
+plot(y ~ x)
+abline(fit)
+sum(fit$residuals)
+
+```
